@@ -3,22 +3,40 @@ from slugify import slugify
 from flask import Flask, render_template, request, session, make_response, flash, redirect, url_for
 import random
 import hashlib
+import psycopg2
+
+connect_users = psycopg2.connect(
+    host="localhost",
+    database="contacts",
+    user="postgres",
+    password="Bahodir2005"
+)
+
+cloud = psycopg2.connect(
+    "postgresql://Fikrlog_users_owner:zREM0lZt3kxh@ep-red-art-a278gyy5.eu-central-1.aws.neon.tech/Fikrlog_users?sslmode=require")
 
 app = Flask(__name__)
 app.secret_key = "this_is_a_very_secret"
+cur = connect_users.cursor()
+instructor = cloud.cursor()
+cur.execute("""CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY, 
+            first_name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL, 
+            password TEXT NOT NULL)"""
+            )
 
-pas = "admin"
-hashed_password = hashlib.sha512(pas.encode()).hexdigest()
-users = {
-    "admin": hashed_password
-}
-
+instructor.execute("""CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY, 
+                   first_name TEXT NOT NULL,
+                   email TEXT UNIQUE NOT NULL, 
+                   password TEXT NOT NULL)"""
+                   )
+instructor.execute("COMMIT")
 
 def read_title():
     files = os.listdir("articles")
     slug_articles = {}
     for file in files:
-        #title, _ = os.path.splitext(file)
+        # title, _ = os.path.splitext(file)
         title = file.rsplit('.', 1)[0]
         slug = slugify(title)
         slug_articles[slug] = file
@@ -76,14 +94,17 @@ def first_time():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
+        user_or_email = request.form.get('user_or_email')
         password = request.form.get('password')
         password_hashed = hashlib.sha512(password.encode()).hexdigest()
-        if username in users and users[username] == password_hashed:
+
+        instructor.execute("SELECT * FROM Users WHERE email= %s OR first_name= %s", (user_or_email, user_or_email))
+        user_from_database = instructor.fetchone()
+
+        if user_from_database is not None and user_from_database[3] == password_hashed:
             flash('Logged successfully!', 'success')
         else:
             flash('Invalid username or password', 'danger')
-
 
     return render_template("login.html")
 
@@ -92,25 +113,32 @@ def login():
 def register():
     password = ""
     if request.method == 'POST':
+        email = request.form.get('email')
         username = request.form.get('username')
-        if username in users:
-            flash("Username is already taken", 'danger')
-            return render_template("register.html")
 
         if request.form.get('password') == request.form.get('password_second'):
             password = request.form.get('password')
         else:
             flash("Passwords don't match", 'danger')
             return render_template("register.html")
-        email = request.form.get('email')
+
         password_hashed = hashlib.sha512(password.encode()).hexdigest()
 
-        if username not in users:
-            users[username] = password_hashed
-        else:
-            flash("User already logged", 'danger')
+        instructor.execute("SELECT * FROM Users WHERE email= %s", (email,))
+        email_from_database = instructor.fetchone()
 
-        print(users)
+        if email_from_database is None:
+            cur.execute("INSERT INTO Users(first_name,email,password) VALUES(%s, %s, %s)",
+                        (username, email, password_hashed))
+            connect_users.commit()
+
+            instructor.execute("INSERT INTO Users(first_name,email,password) VALUES(%s, %s, %s)",
+                        (username, email, password_hashed))
+            instructor.execute("COMMIT")
+
+        else:
+            flash("User already exists", 'danger')
+
     return render_template('register.html')
 
 
